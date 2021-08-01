@@ -1,0 +1,14 @@
+[package]
+name = "raiden-shogun-search"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+crossbeam = "0.8.1"
+fst = {version = "0.4.7", features = ["levenshtein"]}
+memmap2 = "0.3.0"
+jieba-rs = "0.6.5"
+byteorder = "1.4.3"
+roaring = "0.7.0"
