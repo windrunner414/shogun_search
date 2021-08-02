@@ -44,7 +44,7 @@ fn test_build_indexes() {
 
     let mut builder = Builder::new(title_analyzer, content_analyzer, Config::new(PathBuf::from("./test_store/"), "test"));
 
-    for entry in read_dir("/Users/yuxiang.liu/Downloads/test").unwrap() {
+    for entry in read_dir("../raiden-shogun/test_dataset/").unwrap() {
         let entry = entry.unwrap();
         let metadata = entry.metadata().unwrap();
 
@@ -88,8 +88,8 @@ fn test_query_single() {
 
     let time = SystemTime::now();
 
-    let results = query.query("线下赛事", &|w| {
-        Levenshtein::new(w, 0).ok()
+    let results = query.query("带我走吧", &|w| {
+        Levenshtein::new(w, if w.chars().count() > 3 { 1 } else { 0 }).ok()
     }).unwrap();
 
     let costs = SystemTime::now().duration_since(time).unwrap().as_millis();
@@ -97,7 +97,7 @@ fn test_query_single() {
     let mut string = String::new();
     for r in results.iter() {
         string.push('\n');
-        string.push_str(read_to_string(format!("/Users/yuxiang.liu/Downloads/test/TT.{}", r)).unwrap().as_str());
+        string.push_str(read_to_string(format!("../raiden-shogun/test_dataset/#.{}", r)).unwrap().as_str());
     }
     println!("{}", string);
 

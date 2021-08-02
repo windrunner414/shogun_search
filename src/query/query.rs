@@ -9,11 +9,12 @@ use crate::store::constants::{TERM_INDEX_FILE_SUFFIX, TERM_INDEX_MAGIC_NUMBER, V
 use crate::query::{Result, Error};
 use byteorder::{LittleEndian, ByteOrder, ReadBytesExt};
 use fst::automaton::Levenshtein;
-use fst::IntoStreamer;
+use fst::{IntoStreamer, Automaton};
 use std::collections::HashSet;
 use roaring::RoaringTreemap;
 use std::io::{Read, Seek, SeekFrom};
 use std::ops::Deref;
+use crate::store::posting::{PostingList, RawPostingList, ScoredPostingList, posting_list_intersection};
 
 #[derive(Debug)]
 pub struct Config<'a> {
@@ -87,10 +88,8 @@ impl<'a, C, T, I> Query<'a, C, T, I>
     }
 
     #[inline(always)]
-    fn find_posting_list(&mut self, offset: u64) -> Result<RoaringTreemap> {
-        self.term_dict.seek(SeekFrom::Start(offset))?;
-        let roaring = RoaringTreemap::deserialize_from(&self.term_dict)?;
-        Ok(roaring)
+    fn find_posting_list(&mut self, offset: u64) -> Result<RawPostingList> {
+        Ok(RawPostingList::new(&mut self.term_dict, SeekFrom::Start(offset))?)
     }
 
     #[inline(always)]
@@ -98,7 +97,7 @@ impl<'a, C, T, I> Query<'a, C, T, I>
         &mut self,
         word: &str,
         aut_builder: &impl Fn(&str) -> Option<A>
-    ) -> Result<Vec<(String, RoaringTreemap)>> {
+    ) -> Result<Vec<(String, RawPostingList)>> {
         let dict_indexes = match aut_builder(word) {
             None => self.term_index.get(word).map_or_else(
                 Vec::new,
@@ -107,7 +106,7 @@ impl<'a, C, T, I> Query<'a, C, T, I>
             Some(aut) => self.term_index.search(aut).into_stream().into_str_vec()?
         };
 
-        let mut result = Vec::<(String, RoaringTreemap)>::new();
+        let mut result = Vec::<(String, RawPostingList)>::new();
         for index in dict_indexes {
             result.push((index.0, self.find_posting_list(index.1)?));
         }
@@ -119,14 +118,51 @@ impl<'a, C, T, I> Query<'a, C, T, I>
         &mut self,
         sentence: &str,
         aut_builder: &impl Fn(&str) -> Option<A>
-    ) -> Result<HashSet<u64>> {
-        let mut postings = Vec::<(&str, Vec<(String, RoaringTreemap)>)>::new();
+    ) -> Result<HashSet<u32>> {
+        let mut postings = Vec::<(&str, Vec<(String, RawPostingList)>)>::new();
 
         for word in self.analyzer.analyze(sentence)? {
             postings.push((word, self.query_word_postings(word, aut_builder)?));
         }
 
-        Ok(HashSet::<u64>::new())
+        println!("{:?}", postings);
+
+        let mut result = HashSet::<u32>::new();
+
+        let mut list: Option<RawPostingList> = None;
+        let mut scored: Option<ScoredPostingList> = None;
+        for r in postings.into_iter() {
+            match r.1.into_iter().next() {
+                None => (),
+                Some(l) => match scored {
+                    None => {
+                        match list {
+                            None => list = Some(l.1),
+                            Some(ref o) => scored = Some(posting_list_intersection(&l.1, o)?)
+                        }
+                    },
+                    Some(s) => scored = Some(posting_list_intersection(&s,&l.1)?)
+                }
+            }
+        }
+
+        match scored {
+            None => match list {
+                None => (),
+                Some(l) => {
+                    for i in 0..l.len() {
+                        result.insert(l.get(i)?);
+                    }
+                }
+            },
+            Some(s) => {
+                for i in 0..s.len() {
+                    result.insert(s.get(i)?);
+                }
+            }
+        }
+
+        Ok(result)
     }
 }
 
@@ -146,12 +182,4 @@ fn check_term_dict(mut reader: impl std::io::Read) -> Result<usize> {
     }
 
     Ok((64 + 8) / 8)
-}
-
-struct PostingList {
-
-}
-
-impl PostingList {
-
 }

@@ -6,6 +6,7 @@ use memmap2::{Mmap, MmapOptions};
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
 use std::cmp::Ordering;
+use std::ops::Deref;
 
 pub type BuildingPostingMap = BTreeMap<u32, BuildingPostingData>;
 
@@ -34,6 +35,7 @@ impl BuildingPostingData {
 }
 
 const POSTING_SIZE: u32 = (32 + 16 + 16) / 8;
+const INTERSECTION_PERFORMANCE_TIPPING_SIZE_DIFF: u32 = 50;
 
 #[derive(Debug)]
 pub struct PostingListBuilder<'a, W: std::io::Write> {
@@ -47,7 +49,7 @@ impl<'a, W: std::io::Write> PostingListBuilder<'a, W> {
     }
 
     pub fn finish(&mut self) -> Result<u64> {
-        self.writer.write_u32::<LittleEndian>(self.map.len() as u32);
+        self.writer.write_u32::<LittleEndian>(self.map.len() as u32)?;
         let mut len = 4u64;
 
         for v in self.map.iter() {
@@ -62,17 +64,128 @@ impl<'a, W: std::io::Write> PostingListBuilder<'a, W> {
     }
 }
 
+pub fn posting_list_intersection<A: PostingList, B: PostingList>(a: &A, b: &B) -> Result<ScoredPostingList> {
+    if a.len() < b.len() / INTERSECTION_PERFORMANCE_TIPPING_SIZE_DIFF {
+        posting_list_intersection_search(a, b)
+    } else if b.len() < a.len() / INTERSECTION_PERFORMANCE_TIPPING_SIZE_DIFF {
+        posting_list_intersection_search(b, a)
+    } else {
+        posting_list_intersection_stitch(a, b)
+    }
+}
+
+fn posting_list_intersection_search<A: PostingList, B: PostingList>(smaller: &A, larger: &B) -> Result<ScoredPostingList> {
+    let mut result = ScoredPostingList::new();
+
+    let mut min = 0u32;
+
+    for i in 0..smaller.len() {
+        let value = smaller.get(i)?;
+        let mut max = larger.len();
+
+        while min < max {
+            let mid = min + ((max - min) >> 1);
+            let c_value = larger.get(mid)?;
+
+            if c_value < value {
+                min = mid + 1;
+            } else if c_value > value {
+                max = mid;
+            } else {
+                result.add(value);
+                min = mid + 1;
+                break;
+            }
+        }
+
+        if min >= larger.len() { break; }
+    }
+
+    Ok(result)
+}
+
+fn posting_list_intersection_stitch<A: PostingList, B: PostingList>(a: &A, b: &B) -> Result<ScoredPostingList> {
+    let (mut i, mut j) = (0u32, 0u32);
+
+    let mut result = ScoredPostingList::new();
+
+    while i < a.len() && j < b.len() {
+        let va = a.get(i)?;
+        let vb = b.get(j)?;
+
+        if va < vb {
+            i += 1;
+        } else if va > vb {
+            j += 1;
+        } else {
+            result.add(va);
+            i += 1;
+            j += 1;
+        }
+    }
+
+    Ok(result)
+}
+
+pub trait PostingList {
+    fn len(&self) -> u32;
+    fn get(&self, index: u32) -> Result<u32>;
+}
+
 #[derive(Debug)]
-pub struct PostingList {
+pub struct ScoredPostingList {
+    postings: Vec<u32>,
+}
+
+impl PostingList for ScoredPostingList {
+    #[inline(always)]
+    fn len(&self) -> u32 { self.postings.len() as u32 }
+
+    #[inline(always)]
+    fn get(&self, index: u32) -> Result<u32> {
+        if index >= self.len() {
+            return Err(Error::OutOfRange);
+        }
+
+        Ok(self.postings[index as usize])
+    }
+}
+
+impl ScoredPostingList {
+    fn new() -> Self {
+        ScoredPostingList { postings: Vec::<u32>::new() }
+    }
+
+    fn add(&mut self, id: u32) {
+        self.postings.push(id);
+    }
+}
+
+#[derive(Debug)]
+pub struct RawPostingList {
     mmap: Mmap,
     len: u32,
 }
 
-impl PostingList {
-    pub fn new(file: &File, seek: SeekFrom) -> Result<Self> {
-        let mut reader = std::io::BufReader::new(file);
-        let offset = reader.seek(seek)?;
-        let len = reader.read_u32::<LittleEndian>()?;
+impl PostingList for RawPostingList {
+    #[inline(always)]
+    fn len(&self) -> u32 { self.len }
+
+    #[inline(always)]
+    fn get(&self, index: u32) -> Result<u32> {
+        if index >= self.len() {
+            return Err(Error::OutOfRange);
+        }
+
+        Ok(LittleEndian::read_u32(&self.mmap[(index * POSTING_SIZE) as usize..]))
+    }
+}
+
+impl RawPostingList {
+    pub fn new(file: &mut File, seek_from: SeekFrom) -> Result<Self> {
+        let offset = file.seek(seek_from)?;
+
+        let len = file.read_u32::<LittleEndian>()?;
 
         if len == 0 {
             return Err(Error::OutOfRange);
@@ -85,144 +198,8 @@ impl PostingList {
         }
 
         let mmap = unsafe {
-            MmapOptions::new().offset(offset + 4).len(bytes as usize).map(file)?
+            MmapOptions::new().offset(offset + 4).len(bytes as usize).map(&*file)?
         };
-        Ok(PostingList { mmap, len })
-    }
-
-    #[inline(always)]
-    pub fn len(&self) -> u32 { self.len }
-
-    #[inline(always)]
-    pub fn get(&self, index: u32) -> Result<u32> {
-        if index >= self.len() {
-            return Err(Error::OutOfRange);
-        }
-
-        Ok(LittleEndian::read_u32(&self.mmap[(index * POSTING_SIZE) as usize..]))
-    }
-
-    pub fn intersect(&self, other: &PostingList) -> Result<Vec<u32>> {
-        let mut result = Vec::<u32>::new();
-
-        let mut target = 2;
-        let mut min1 = 0u32;
-        let mut min2 = 0u32;
-        let max1 = self.len();
-        let max2 = other.len();
-
-        let mut want = 0;
-
-        while min1 < max1 && min2 < max2 {
-            if target == 2 {
-                want = self.get(min1)?;
-
-                let mut min = min2;
-                let mut max = max2;
-
-                match other.get(max - 1)?.cmp(&want) {
-                    Ordering::Equal => {
-                        result.push(want);
-                        min2 = max2;
-                    },
-                    Ordering::Less => {
-                        min2 = max2;
-                    },
-                    _ => {
-                        match other.get(min)?.cmp(&want) {
-                            Ordering::Equal => {
-                                result.push(want);
-                                target = 1;
-                                min2 = min + 1;
-                            },
-                            Ordering::Greater => {
-                                min1 += 1;
-                                target = 1;
-                            },
-                            _ =>  {
-                                while min < max {
-                                    let mid = (min + max) / 2;
-                                    let v = other.get(mid)?;
-                                    match v.cmp(&want) {
-                                        Ordering::Equal => {
-                                            result.push(want);
-                                            target = 1;
-                                            min2 = mid + 1;
-                                            break;
-                                        },
-                                        Ordering::Less => {
-                                            min = mid + 1;
-                                        },
-                                        Ordering::Greater => {
-                                            max = mid;
-                                        }
-                                    }
-                                }
-
-                                if min == max {
-                                    target = 1;
-                                    min2 = max;
-                                }
-                            }
-                        }
-                    }
-                }
-            } else {
-                want = self.get(min2)?;
-
-                let mut min = min1;
-                let mut max = max1;
-
-                match self.get(max - 1)?.cmp(&want) {
-                    Ordering::Equal => {
-                        result.push(want);
-                        min1 = max1;
-                    },
-                    Ordering::Less => {
-                        min1 = max1;
-                    },
-                    _ => {
-                        match self.get(min)?.cmp(&want) {
-                            Ordering::Equal => {
-                                result.push(want);
-                                target = 2;
-                                min1 = min + 1;
-                            },
-                            Ordering::Greater => {
-                                min2 += 1;
-                                target = 2;
-                            },
-                            _ =>  {
-                                while min < max {
-                                    let mid = (min + max) / 2;
-                                    let v = self.get(mid)?;
-                                    match v.cmp(&want) {
-                                        Ordering::Equal => {
-                                            result.push(want);
-                                            target = 2;
-                                            min1 = mid + 1;
-                                            break;
-                                        },
-                                        Ordering::Less => {
-                                            min = mid + 1;
-                                        },
-                                        Ordering::Greater => {
-                                            max = mid;
-                                        }
-                                    }
-                                }
-
-                                if min == max {
-                                    target = 2;
-                                    min1 = max;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(result)
+        Ok(RawPostingList { mmap, len })
     }
 }

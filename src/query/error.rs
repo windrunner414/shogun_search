@@ -1,4 +1,5 @@
 use crate::analyzer;
+use crate::store;
 
 use std::fmt::{Formatter, Debug, Display};
 
@@ -9,7 +10,8 @@ pub enum Error {
     Analyze(analyzer::Error),
     Io(std::io::Error),
     Fst(fst::Error),
-    Incompatible
+    Incompatible,
+    Store(store::Error)
 }
 
 impl std::fmt::Display for Error {
@@ -19,6 +21,7 @@ impl std::fmt::Display for Error {
             Error::Io(ref e) => Display::fmt(&e, f),
             Error::Fst(ref e) => Display::fmt(&e, f),
             Error::Incompatible => write!(f, "incompatible data file"),
+            Error::Store(ref e) => Display::fmt(&e, f)
         }
     }
 }
@@ -30,6 +33,7 @@ impl std::error::Error for Error {
             Error::Io(ref e) => Some(e),
             Error::Fst(ref e) => Some(e),
             Error::Incompatible => None,
+            Error::Store(ref e) => Some(e)
         }
     }
 }
@@ -49,5 +53,11 @@ impl From<analyzer::Error> for Error {
 impl From<fst::Error> for Error {
     fn from(e: fst::Error) -> Self {
         Error::Fst(e)
+    }
+}
+
+impl From<store::Error> for Error {
+    fn from(e: store::Error) -> Self {
+        Error::Store(e)
     }
 }
