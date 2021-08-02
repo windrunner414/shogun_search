@@ -9,6 +9,8 @@ pub enum Error {
     Analyze(analyzer::Error),
     Io(std::io::Error),
     Fst(fst::Error),
+    Incompatible,
+    OutOfRange
 }
 
 impl std::fmt::Display for Error {
@@ -17,6 +19,8 @@ impl std::fmt::Display for Error {
             Error::Analyze(ref e) => Display::fmt(&e, f),
             Error::Io(ref e) => Display::fmt(&e, f),
             Error::Fst(ref e) => Display::fmt(&e, f),
+            Error::Incompatible => write!(f, "incompatible data file"),
+            Error::OutOfRange => write!(f, "out of range")
         }
     }
 }
@@ -27,6 +31,8 @@ impl std::error::Error for Error {
             Error::Analyze(ref e) => Some(e),
             Error::Io(ref e) => Some(e),
             Error::Fst(ref e) => Some(e),
+            Error::Incompatible => None,
+            Error::OutOfRange => None
         }
     }
 }

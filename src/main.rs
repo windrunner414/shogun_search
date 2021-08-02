@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::fs::{read_dir, read_to_string};
 use std::time::SystemTime;
 use crate::query::query::Query;
+use fst::automaton::{Levenshtein, AlwaysMatch};
 
 mod analyzer;
 mod store;
@@ -43,7 +44,7 @@ fn test_build_indexes() {
 
     let mut builder = Builder::new(title_analyzer, content_analyzer, Config::new(PathBuf::from("./test_store/"), "test"));
 
-    for entry in read_dir("../raiden-shogun/test_dataset").unwrap() {
+    for entry in read_dir("/Users/yuxiang.liu/Downloads/test").unwrap() {
         let entry = entry.unwrap();
         let metadata = entry.metadata().unwrap();
 
@@ -53,7 +54,7 @@ fn test_build_indexes() {
 
             let title = filename[0];
             let content = read_to_string(entry.path()).unwrap();
-            let id = filename[1].parse::<u64>().unwrap();
+            let id = filename[1].parse::<u32>().unwrap();
 
             builder.add_document(Document {id, title, content: content.as_str()}).unwrap();
         }
@@ -76,24 +77,27 @@ fn test_query_single() {
     print_time_cost!("init analyzer", time);
 
     let mut query = Query::new(
-        analyzer, query::Config::new(
+        analyzer,
+        query::Config::new(
         PathBuf::from("./test_store/"),
         "test",
         3,
         1,
-        1
-    )).unwrap();
+        )
+    ).unwrap();
 
     let time = SystemTime::now();
 
-    let results = query.query_single("乃琳").unwrap();
+    let results = query.query("线下赛事", &|w| {
+        Levenshtein::new(w, 0).ok()
+    }).unwrap();
 
     let costs = SystemTime::now().duration_since(time).unwrap().as_millis();
 
     let mut string = String::new();
     for r in results.iter() {
         string.push('\n');
-        string.push_str(read_to_string(format!("../raiden-shogun/test_dataset/#.{}", r)).unwrap().as_str());
+        string.push_str(read_to_string(format!("/Users/yuxiang.liu/Downloads/test/TT.{}", r)).unwrap().as_str());
     }
     println!("{}", string);
 

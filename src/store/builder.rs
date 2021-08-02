@@ -25,7 +25,6 @@ impl<'a> Config<'a> {
         }
     }
 
-    #[inline]
     fn build_file_path(&self, suffix: &str) -> PathBuf {
         let mut buf = self.store_dir.clone();
         buf.push(String::from(self.identifier) + suffix);
@@ -44,7 +43,7 @@ pub struct Builder<'a, C, T, I, C2, T2, I2>
     config: Config<'a>,
 
     dict: BuildingTermDictionary,
-    doc_num: u64,
+    doc_num: u32,
 }
 
 impl<'a, C, T, I, C2, T2, I2> Builder<'a, C, T, I, C2, T2, I2>
@@ -79,7 +78,7 @@ impl<'a, C, T, I, C2, T2, I2> Builder<'a, C, T, I, C2, T2, I2>
     }
 
     #[inline]
-    fn add_term(&mut self, term: &str, id: u64, is_title: bool) -> Result<()> {
+    fn add_term(&mut self, term: &str, id: u32, is_title: bool) -> Result<()> {
         match self.dict.get_mut(term) {
             None => {
                 self.dict.insert(term.to_string(), BuildingTermData::new(id, is_title));
@@ -129,9 +128,9 @@ impl<'a, C, T, I, C2, T2, I2> Builder<'a, C, T, I, C2, T2, I2>
     fn write_dict_header(&self, writer: &mut std::io::BufWriter<File>) -> Result<u64> {
         writer.write_u64::<LittleEndian>(TERM_DICT_MAGIC_NUMBER)?;
         writer.write_u8(VERSION)?;
-        writer.write_u64::<LittleEndian>(self.doc_num)?;
+        writer.write_u32::<LittleEndian>(self.doc_num)?;
 
-        Ok((64 + 8 + 64) / 8)
+        Ok((64 + 8 + 32) / 8)
     }
 
     #[inline]

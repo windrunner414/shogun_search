@@ -9,7 +9,7 @@ pub struct BuildingTermData {
 }
 
 impl BuildingTermData {
-    pub fn new(id: u64, is_title: bool) -> Self {
+    pub fn new(id: u32, is_title: bool) -> Self {
         let mut d = BuildingTermData {
             posting_map: BuildingPostingMap::new(),
         };
@@ -17,7 +17,7 @@ impl BuildingTermData {
         d
     }
 
-    pub fn add_posting(&mut self, id: u64, is_title: bool) {
+    pub fn add_posting(&mut self, id: u32, is_title: bool) {
         match self.posting_map.get_mut(&id) {
             None => {
                 self.posting_map.insert(id, BuildingPostingData::new(is_title));

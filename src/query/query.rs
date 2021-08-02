@@ -13,14 +13,14 @@ use fst::IntoStreamer;
 use std::collections::HashSet;
 use roaring::RoaringTreemap;
 use std::io::{Read, Seek, SeekFrom};
+use std::ops::Deref;
 
 #[derive(Debug)]
 pub struct Config<'a> {
     store_dir: PathBuf,
     identifier: &'a str,
     title_priority: u8,
-    content_priority: u8,
-    lev_distance: u8,
+    content_priority: u8
 }
 
 impl<'a> Config<'a> {
@@ -28,19 +28,16 @@ impl<'a> Config<'a> {
         store_dir: PathBuf,
         identifier: &'a str,
         title_priority: u8,
-        content_priority: u8,
-        lev_distance: u8
+        content_priority: u8
     ) -> Self {
         Config {
             store_dir,
             identifier,
             title_priority,
-            content_priority,
-            lev_distance
+            content_priority
         }
     }
 
-    #[inline]
     fn build_file_path(&self, suffix: &str) -> PathBuf {
         let mut buf = self.store_dir.clone();
         buf.push(String::from(self.identifier) + suffix);
@@ -55,6 +52,7 @@ pub struct Query<'a, C, T, I>
     config: Config<'a>,
     term_index: fst::Map<Mmap>,
     term_dict: File,
+    doc_num: u32
 }
 
 impl<'a, C, T, I> Query<'a, C, T, I>
@@ -72,47 +70,63 @@ impl<'a, C, T, I> Query<'a, C, T, I>
         };
         let fst = fst::Map::new(mmap)?;
 
-        let dict_file = File::open(config.build_file_path(TERM_DICT_FILE_SUFFIX)
+        let mut dict_file = File::open(config.build_file_path(TERM_DICT_FILE_SUFFIX)
             .to_str().unwrap())?;
-        check_term_dict(&dict_file);
+        check_term_dict(&dict_file)?;
+        let doc_num = dict_file.read_u32::<LittleEndian>()?;
 
         let query = Query {
             analyzer,
             config,
             term_index: fst,
-            term_dict: dict_file
+            term_dict: dict_file,
+            doc_num
         };
 
         Ok(query)
     }
 
-    fn query_posting_list(&mut self, offset: u64) -> Result<RoaringTreemap> {
+    #[inline(always)]
+    fn find_posting_list(&mut self, offset: u64) -> Result<RoaringTreemap> {
         self.term_dict.seek(SeekFrom::Start(offset))?;
         let roaring = RoaringTreemap::deserialize_from(&self.term_dict)?;
         Ok(roaring)
     }
 
-    pub fn query_single(&mut self, word: &str) -> Result<HashSet<u64>> {
-        let results = match Levenshtein::new(word, self.config.lev_distance as u32) {
-            Ok(lev) => self.term_index.search(lev).into_stream().into_str_vec()?,
-            Err(e) => {
-                println!("{}", e);
-                match self.term_index.get(word) {
-                    None => { vec![] }
-                    Some(v) => { vec![(word.to_string(), v)] }
-                }
-            },
+    #[inline(always)]
+    fn query_word_postings<A: fst::Automaton>(
+        &mut self,
+        word: &str,
+        aut_builder: &impl Fn(&str) -> Option<A>
+    ) -> Result<Vec<(String, RoaringTreemap)>> {
+        let dict_indexes = match aut_builder(word) {
+            None => self.term_index.get(word).map_or_else(
+                Vec::new,
+                |i| vec![(word.to_string(), i)]
+            ),
+            Some(aut) => self.term_index.search(aut).into_stream().into_str_vec()?
         };
 
-        let mut set = HashSet::<u64>::new();
-        for result in results {
-            let posting_list = self.query_posting_list(result.1)?;
-            for id in posting_list.iter() {
-                set.insert(id);
-            }
+        let mut result = Vec::<(String, RoaringTreemap)>::new();
+        for index in dict_indexes {
+            result.push((index.0, self.find_posting_list(index.1)?));
         }
 
-        Ok(set)
+        Ok(result)
+    }
+
+    pub fn query<A: fst::Automaton>(
+        &mut self,
+        sentence: &str,
+        aut_builder: &impl Fn(&str) -> Option<A>
+    ) -> Result<HashSet<u64>> {
+        let mut postings = Vec::<(&str, Vec<(String, RoaringTreemap)>)>::new();
+
+        for word in self.analyzer.analyze(sentence)? {
+            postings.push((word, self.query_word_postings(word, aut_builder)?));
+        }
+
+        Ok(HashSet::<u64>::new())
     }
 }
 
@@ -132,4 +146,12 @@ fn check_term_dict(mut reader: impl std::io::Read) -> Result<usize> {
     }
 
     Ok((64 + 8) / 8)
+}
+
+struct PostingList {
+
+}
+
+impl PostingList {
+
 }
