@@ -1,5 +1,6 @@
+use crate::store::posting::{BuildingPostingData, BuildingPostingMap};
+use crate::store::Document;
 use std::collections::BTreeMap;
-use crate::store::posting::{BuildingPostingMap, BuildingPostingData};
 
 pub type BuildingTermDictionary = BTreeMap<String, BuildingTermData>;
 
@@ -9,20 +10,20 @@ pub struct BuildingTermData {
 }
 
 impl BuildingTermData {
-    pub fn new(id: u32, is_title: bool) -> Self {
-        let mut d = BuildingTermData {
+    pub fn new() -> Self {
+        BuildingTermData {
             posting_map: BuildingPostingMap::new(),
-        };
-        d.add_posting(id, is_title);
-        d
+        }
     }
 
-    pub fn add_posting(&mut self, id: u32, is_title: bool) {
-        match self.posting_map.get_mut(&id) {
+    pub fn add_posting(&mut self, doc: &Document, is_title: bool) {
+        match self.posting_map.get_mut(&doc.id) {
             None => {
-                self.posting_map.insert(id, BuildingPostingData::new(is_title));
+                let mut d = BuildingPostingData::new(doc);
+                d.add_tf(is_title);
+                self.posting_map.insert(doc.id, d);
             }
-            Some(m) => m.add_tf(is_title)
+            Some(d) => d.add_tf(is_title),
         }
     }
 

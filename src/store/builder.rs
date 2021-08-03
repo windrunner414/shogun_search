@@ -1,15 +1,18 @@
-use crate::store::document::Document;
-use crate::store::error::{Result, Error};
-use crate::store::constants::{TERM_INDEX_FILE_SUFFIX, TERM_INDEX_MAGIC_NUMBER, VERSION, TERM_DICT_FILE_SUFFIX, TERM_DICT_MAGIC_NUMBER};
 use crate::analyzer::analyzer::Analyzer;
 use crate::analyzer::char_filter::CharFilter;
 use crate::analyzer::token_filter::TokenFilter;
 use crate::analyzer::tokenizer::Tokenizer;
-use std::path::PathBuf;
-use std::fs::File;
-use byteorder::{WriteBytesExt, LittleEndian};
+use crate::store::constants::{
+    TERM_DICT_FILE_SUFFIX, TERM_DICT_MAGIC_NUMBER, TERM_INDEX_FILE_SUFFIX, TERM_INDEX_MAGIC_NUMBER,
+    VERSION,
+};
+use crate::store::document::Document;
+use crate::store::error::{Error, Result};
 use crate::store::posting::PostingListBuilder;
-use crate::store::term::{BuildingTermDictionary, BuildingTermData};
+use crate::store::term::{BuildingTermData, BuildingTermDictionary};
+use byteorder::{LittleEndian, WriteBytesExt};
+use std::fs::File;
+use std::path::PathBuf;
 
 #[derive(Debug)]
 pub struct Config<'a> {
@@ -36,8 +39,14 @@ impl<'a> Config<'a> {
 
 #[derive(Debug)]
 pub struct Builder<'a, C, T, I, C2, T2, I2>
-    where C: CharFilter, T: TokenFilter, I: Tokenizer,
-        C2: CharFilter, T2: TokenFilter, I2: Tokenizer {
+where
+    C: CharFilter,
+    T: TokenFilter,
+    I: Tokenizer,
+    C2: CharFilter,
+    T2: TokenFilter,
+    I2: Tokenizer,
+{
     title_analyzer: Analyzer<C, T, I>,
     content_analyzer: Analyzer<C2, T2, I2>,
     config: Config<'a>,
@@ -47,12 +56,18 @@ pub struct Builder<'a, C, T, I, C2, T2, I2>
 }
 
 impl<'a, C, T, I, C2, T2, I2> Builder<'a, C, T, I, C2, T2, I2>
-    where C: CharFilter, T: TokenFilter, I: Tokenizer,
-          C2: CharFilter, T2: TokenFilter, I2: Tokenizer {
+where
+    C: CharFilter,
+    T: TokenFilter,
+    I: Tokenizer,
+    C2: CharFilter,
+    T2: TokenFilter,
+    I2: Tokenizer,
+{
     pub fn new(
         title_analyzer: Analyzer<C, T, I>,
         content_analyzer: Analyzer<C2, T2, I2>,
-        config: Config<'a>
+        config: Config<'a>,
     ) -> Self {
         Builder {
             title_analyzer,
@@ -66,38 +81,46 @@ impl<'a, C, T, I, C2, T2, I2> Builder<'a, C, T, I, C2, T2, I2>
     pub fn add_document(&mut self, doc: Document) -> Result<()> {
         self.doc_num += 1;
 
-        for token in self.title_analyzer.analyze(doc.title)? {
-            self.add_term(token, doc.id, true)?;
+        for term in self.title_analyzer.analyze(doc.title)? {
+            self.add_term(term, &doc, true)?;
         }
 
-        for token in self.content_analyzer.analyze(doc.content)? {
-            self.add_term(token, doc.id, false)?;
+        for term in self.content_analyzer.analyze(doc.content)? {
+            self.add_term(term, &doc, false)?;
         }
 
         Ok(())
     }
 
     #[inline]
-    fn add_term(&mut self, term: &str, id: u32, is_title: bool) -> Result<()> {
+    fn add_term(&mut self, term: &str, doc: &Document, is_title: bool) -> Result<()> {
         match self.dict.get_mut(term) {
             None => {
-                self.dict.insert(term.to_string(), BuildingTermData::new(id, is_title));
+                let mut d = BuildingTermData::new();
+                d.add_posting(doc, is_title);
+                self.dict.insert(term.to_string(), d);
             }
-            Some(v) => v.add_posting(id, is_title)
+            Some(d) => d.add_posting(doc, is_title),
         }
 
         Ok(())
     }
 
     pub fn finish(&mut self) -> Result<()> {
-        let index_file =
-            File::create(self.config.build_file_path(TERM_INDEX_FILE_SUFFIX)
-                .to_str().unwrap())?;
+        let index_file = File::create(
+            self.config
+                .build_file_path(TERM_INDEX_FILE_SUFFIX)
+                .to_str()
+                .unwrap(),
+        )?;
         let mut index_writer = std::io::BufWriter::new(index_file);
 
-        let dict_file =
-            File::create(self.config.build_file_path(TERM_DICT_FILE_SUFFIX)
-                .to_str().unwrap())?;
+        let dict_file = File::create(
+            self.config
+                .build_file_path(TERM_DICT_FILE_SUFFIX)
+                .to_str()
+                .unwrap(),
+        )?;
         let mut dict_writer = std::io::BufWriter::new(dict_file);
         let mut dict_offset = 0u64;
 
@@ -134,7 +157,11 @@ impl<'a, C, T, I, C2, T2, I2> Builder<'a, C, T, I, C2, T2, I2>
     }
 
     #[inline]
-    fn write_dict(&self, writer: &mut std::io::BufWriter<File>, data: &BuildingTermData) -> Result<u64> {
+    fn write_dict(
+        &self,
+        writer: &mut std::io::BufWriter<File>,
+        data: &BuildingTermData,
+    ) -> Result<u64> {
         let mut len = 0u64;
 
         let mut builder = PostingListBuilder::new(writer, data.get_posting_map());

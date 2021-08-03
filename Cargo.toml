@@ -11,4 +11,3 @@ fst = {version = "0.4.7", features = ["levenshtein"]}
 memmap2 = "0.3.0"
 jieba-rs = "0.6.5"
 byteorder = "1.4.3"
-roaring = "0.7.0"
