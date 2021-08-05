@@ -31,11 +31,11 @@ impl CJKDocCharFilter {
 impl CharFilter for CJKDocCharFilter {
     fn filter(&self, text: &str) -> String {
         lazy_static::lazy_static! {
-            static ref regex: Regex = Regex::new(r"[\s\p{N}\p{P}a-zA-Z\u2E80-\uFE4F]+").unwrap();
+            static ref REGEX: Regex = Regex::new(r"[\s\p{N}\p{P}a-zA-Z\u2E80-\uFE4F]+").unwrap();
         }
 
         let mut result = String::new();
-        for capture in regex.captures_iter(text) {
+        for capture in REGEX.captures_iter(text) {
             result.push_str(capture.get(0).unwrap().as_str());
         }
 

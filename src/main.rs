@@ -40,7 +40,7 @@ fn test_build_indexes() {
     );
     let content_analyzer = Analyzer::new(
         CJKDocCharFilter::new(),
-        StopWordTokenFilter::new(&mut stop_words_file),
+        StopWordTokenFilter::new(&mut stop_words_file).unwrap(),
         JiebaTokenizer::new(),
     );
 

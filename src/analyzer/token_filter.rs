@@ -1,3 +1,4 @@
+use crate::analyzer::Result;
 use regex::Regex;
 use std::collections::HashSet;
 use std::fs::File;
@@ -19,10 +20,10 @@ impl BasicTokenFilter {
 impl TokenFilter for BasicTokenFilter {
     fn filter<'a>(&self, token: &'a str) -> Option<&'a str> {
         lazy_static::lazy_static! {
-            static ref regex: Regex = Regex::new(r"\s+").unwrap();
+            static ref REGEX: Regex = Regex::new(r"\s+").unwrap();
         }
 
-        if regex.is_match(token) {
+        if REGEX.is_match(token) {
             None
         } else {
             Some(token)
@@ -36,9 +37,9 @@ pub struct StopWordTokenFilter {
 }
 
 impl StopWordTokenFilter {
-    pub fn new(dict_file: &mut File) -> Self {
+    pub fn new(dict_file: &mut File) -> Result<Self> {
         let mut buf = String::new();
-        dict_file.read_to_string(&mut buf);
+        dict_file.read_to_string(&mut buf)?;
 
         let mut stop_words = HashSet::<String>::new();
 
@@ -46,17 +47,17 @@ impl StopWordTokenFilter {
             stop_words.insert(i.trim().to_string());
         }
 
-        StopWordTokenFilter { stop_words }
+        Ok(StopWordTokenFilter { stop_words })
     }
 }
 
 impl TokenFilter for StopWordTokenFilter {
     fn filter<'a>(&self, token: &'a str) -> Option<&'a str> {
         lazy_static::lazy_static! {
-            static ref regex: Regex = Regex::new(r"\s+").unwrap();
+            static ref REGEX: Regex = Regex::new(r"\s+").unwrap();
         }
 
-        if regex.is_match(token) {
+        if REGEX.is_match(token) {
             return None;
         }
 
