@@ -84,7 +84,7 @@ fn test_query_single() {
     let time = SystemTime::now();
 
     let analyzer = Analyzer::new(
-        BasicCharFilter::new(),
+        CJKDocCharFilter::new(),
         BasicTokenFilter::new(),
         JiebaTokenizer::new(),
     );
