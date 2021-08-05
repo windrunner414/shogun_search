@@ -1,4 +1,5 @@
 use crate::query::Result;
+use std::cmp::Ordering;
 
 #[inline(always)]
 pub fn calc_idf(df: u32, total_doc_num: u32) -> f64 {
@@ -59,4 +60,43 @@ pub unsafe fn calc_cosine_unchecked(a: &[f64], b: &[f64]) -> f64 {
     }
 
     product / (q_sum_a.sqrt() * q_sum_b.sqrt())
+}
+
+#[derive(Debug)]
+pub struct Score {
+    cosine: f64,
+}
+
+impl Score {
+    pub fn new(a: &[f64], b: &[f64]) -> Self {
+        Score {
+            cosine: unsafe { calc_cosine_unchecked(a, b) },
+        }
+    }
+}
+
+impl PartialEq for Score {
+    fn eq(&self, other: &Self) -> bool {
+        self.cosine.eq(&other.cosine)
+    }
+}
+
+impl PartialOrd for Score {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.cosine.partial_cmp(&other.cosine)
+    }
+}
+
+impl Eq for Score {}
+
+impl Ord for Score {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self.cosine > other.cosine {
+            Ordering::Greater
+        } else if self.cosine < other.cosine {
+            Ordering::Less
+        } else {
+            Ordering::Equal
+        }
+    }
 }

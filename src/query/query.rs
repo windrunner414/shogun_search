@@ -3,7 +3,8 @@ use crate::analyzer::char_filter::CharFilter;
 use crate::analyzer::token_filter::TokenFilter;
 use crate::analyzer::tokenizer::Tokenizer;
 use crate::query::score::{
-    calc_cosine_unchecked, calc_norm, calc_tf, TermPriorityCalculator, TfIdfTermPriorityCalculator,
+    calc_cosine_unchecked, calc_norm, calc_tf, Score, TermPriorityCalculator,
+    TfIdfTermPriorityCalculator,
 };
 use crate::query::{Error, Result};
 use crate::store::constants::{
@@ -20,7 +21,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::ops::Deref;
+use std::ops::{Deref, Range};
 use std::path::PathBuf;
 
 #[derive(Debug)]
@@ -155,15 +156,18 @@ where
         &mut self,
         sentence: &str,
         aut_builder: &impl Fn(&str) -> Option<A>,
+        range: Range<usize>,
     ) -> Result<Vec<u32>> {
+        let sentence_ar = self.analyzer.analyze(sentence)?;
+
         let mut postings = Vec::<(&str, RawPostingList)>::new();
 
         let mut query_terms = HashMap::<&str, u16>::new();
 
-        for word in self.analyzer.analyze(sentence)? {
-            match query_terms.get_mut(word) {
+        for word in sentence_ar.iter() {
+            match query_terms.get_mut(word.as_str()) {
                 None => {
-                    query_terms.insert(word, 1);
+                    query_terms.insert(word.as_str(), 1);
                 }
                 Some(i) => {
                     if *i < u16::MAX {
@@ -173,10 +177,10 @@ where
                 }
             }
 
-            match self.query_term_postings(word, aut_builder)? {
+            match self.query_term_postings(word.as_str(), aut_builder)? {
                 None => (),
                 Some(v) => {
-                    postings.push((word, v));
+                    postings.push((word.as_str(), v));
                 }
             }
         }
@@ -221,8 +225,18 @@ where
         });
 
         let pl = merger.get_postings();
-        for i in (0..pl.len()).rev() {
-            result.push(unsafe { pl.get_unchecked(i) }.get_doc_id());
+
+        if range.start < pl.len() {
+            let start = pl.len() - range.start;
+            let end = if range.end <= pl.len() {
+                pl.len() - range.end
+            } else {
+                0
+            };
+
+            for i in (end..start).rev() {
+                result.push(unsafe { pl.get_unchecked(i) }.get_doc_id());
+            }
         }
 
         Ok(result)
@@ -245,43 +259,4 @@ fn check_term_dict(mut reader: impl std::io::Read) -> Result<usize> {
     }
 
     Ok((64 + 8) / 8)
-}
-
-#[derive(Debug)]
-struct Score {
-    cosine: f64,
-}
-
-impl Score {
-    pub fn new(a: &[f64], b: &[f64]) -> Self {
-        Score {
-            cosine: unsafe { calc_cosine_unchecked(a, b) },
-        }
-    }
-}
-
-impl PartialEq for Score {
-    fn eq(&self, other: &Self) -> bool {
-        self.cosine.eq(&other.cosine)
-    }
-}
-
-impl PartialOrd for Score {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.cosine.partial_cmp(&other.cosine)
-    }
-}
-
-impl Eq for Score {}
-
-impl Ord for Score {
-    fn cmp(&self, other: &Self) -> Ordering {
-        if self.cosine > other.cosine {
-            Ordering::Greater
-        } else if self.cosine < other.cosine {
-            Ordering::Less
-        } else {
-            Ordering::Equal
-        }
-    }
 }

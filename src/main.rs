@@ -1,12 +1,12 @@
 use crate::analyzer::analyzer::Analyzer;
-use crate::analyzer::char_filter::BasicCharFilter;
-use crate::analyzer::token_filter::{BasicTokenFilter, TokenFilter};
+use crate::analyzer::char_filter::{BasicCharFilter, CJKDocCharFilter};
+use crate::analyzer::token_filter::{BasicTokenFilter, StopWordTokenFilter, TokenFilter};
 use crate::analyzer::tokenizer::{JiebaTokenizer, Tokenizer};
 use crate::query::Query;
 use crate::store::builder::{Builder, Config};
 use crate::store::document::Document;
 use fst::automaton::{AlwaysMatch, Levenshtein};
-use std::fs::{read_dir, read_to_string};
+use std::fs::{read_dir, read_to_string, File};
 use std::path::PathBuf;
 use std::time::SystemTime;
 
@@ -32,14 +32,15 @@ fn main() {
 fn test_build_indexes() {
     let time = SystemTime::now();
 
+    let mut stop_words_file = File::open("./dict/stop_words.txt").unwrap();
     let title_analyzer = Analyzer::new(
-        BasicCharFilter::new(),
-        BasicTokenFilter::new(false),
+        CJKDocCharFilter::new(),
+        BasicTokenFilter::new(),
         JiebaTokenizer::new(),
     );
     let content_analyzer = Analyzer::new(
-        BasicCharFilter::new(),
-        BasicTokenFilter::new(true),
+        CJKDocCharFilter::new(),
+        StopWordTokenFilter::new(&mut stop_words_file),
         JiebaTokenizer::new(),
     );
 
@@ -84,7 +85,7 @@ fn test_query_single() {
 
     let analyzer = Analyzer::new(
         BasicCharFilter::new(),
-        BasicTokenFilter::new(false),
+        BasicTokenFilter::new(),
         JiebaTokenizer::new(),
     );
 
@@ -99,9 +100,11 @@ fn test_query_single() {
     let time = SystemTime::now();
 
     let results = query
-        .query("测试 测试", &|w| {
-            Levenshtein::new(w, if w.chars().count() > 3 { 1 } else { 0 }).ok()
-        })
+        .query(
+            "测试",
+            &|w| Levenshtein::new(w, if w.chars().count() > 4 { 1 } else { 0 }).ok(),
+            0..10,
+        )
         .unwrap();
 
     let costs = SystemTime::now().duration_since(time).unwrap().as_millis();
@@ -115,7 +118,7 @@ fn test_query_single() {
                 .as_str(),
         );
     }
-    //println!("{}", string);
+    println!("{}", string);
     println!("{:?}", results);
 
     println!("search costs: {}ms, total: {}", costs, results.len());

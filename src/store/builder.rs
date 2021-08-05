@@ -82,11 +82,11 @@ where
         self.doc_num += 1;
 
         for term in self.title_analyzer.analyze(doc.title)? {
-            self.add_term(term, &doc, true)?;
+            self.add_term(term.as_str(), &doc, true)?;
         }
 
         for term in self.content_analyzer.analyze(doc.content)? {
-            self.add_term(term, &doc, false)?;
+            self.add_term(term.as_str(), &doc, false)?;
         }
 
         Ok(())
