@@ -7,9 +7,15 @@ edition = "2018"
 
 [dependencies]
 crossbeam = "0.8.1"
-fst = {version = "0.4.7", features = ["levenshtein"]}
+fst = { version = "0.4.7", features = ["levenshtein"] }
 memmap2 = "0.3.0"
 jieba-rs = "0.6.5"
 byteorder = "1.4.3"
 lazy_static = "1.4.0"
 regex = "1.5.4"
+clap = "2.33.3"
+futures = "0.3.17"
+hyper = { version = "0.14.13", features = ["full"] }
+tokio = { version = "1.12.0", features = ["full"] }
+serde = { version = "1.0.130", features = ["derive"] }
+serde_json = "1.0.68"

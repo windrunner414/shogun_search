@@ -3,15 +3,29 @@ use crate::analyzer::char_filter::{BasicCharFilter, CJKDocCharFilter};
 use crate::analyzer::token_filter::{BasicTokenFilter, StopWordTokenFilter, TokenFilter};
 use crate::analyzer::tokenizer::{JiebaTokenizer, Tokenizer};
 use crate::query::Query;
+use crate::service::build::{start_builder_thread, AddPostReq, BuildService, BuildServiceTask};
 use crate::store::builder::{Builder, Config};
 use crate::store::document::Document;
-use fst::automaton::{AlwaysMatch, Levenshtein};
+use clap::{App, Arg, SubCommand};
+use core::future;
+use fst::automaton::Levenshtein;
+use futures::StreamExt;
+use hyper::service::{make_service_fn, service_fn, Service};
+use hyper::{Body, Method, Request, Response, Server, StatusCode};
+use serde::{Deserialize, Serialize};
 use std::fs::{read_dir, read_to_string, File};
+use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::str::FromStr;
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{mpsc, Arc, Mutex};
+use std::task::{Context, Poll};
+use std::thread;
 use std::time::SystemTime;
 
 mod analyzer;
 mod query;
+mod service;
 mod store;
 
 macro_rules! print_time_cost {
@@ -24,61 +38,69 @@ macro_rules! print_time_cost {
     };
 }
 
-fn main() {
-    //test_build_indexes();
-    test_query_single();
+#[tokio::main]
+async fn main() {
+    //test_query_single();
+
+    let matches = App::new("Raiden Shogun Search")
+        .version("0.0.1")
+        .author("Yuxiang Liu <windrunner414@outlook.com>")
+        .about("full text search")
+        .arg(
+            Arg::with_name("address")
+                .short("a")
+                .value_name("ADDRESS")
+                .help("bind address")
+                .required(true)
+                .takes_value(true),
+        )
+        .subcommand(SubCommand::with_name("build").about("build indexes"))
+        .get_matches();
+
+    let address = SocketAddr::from_str(matches.value_of("address").unwrap()).unwrap();
+
+    match matches.subcommand_matches("build") {
+        Some(_) => run_build_server(address).await,
+        None => run_query_server(address).await,
+    };
 }
 
-fn test_build_indexes() {
-    let time = SystemTime::now();
+struct MakeBuildService {
+    tx: Sender<BuildServiceTask>,
+}
 
-    let mut stop_words_file = File::open("./dict/stop_words.txt").unwrap();
-    let title_analyzer = Analyzer::new(
-        CJKDocCharFilter::new(),
-        BasicTokenFilter::new(),
-        JiebaTokenizer::new(),
-    );
-    let content_analyzer = Analyzer::new(
-        CJKDocCharFilter::new(),
-        StopWordTokenFilter::new(&mut stop_words_file).unwrap(),
-        JiebaTokenizer::new(),
-    );
+impl<T> Service<T> for MakeBuildService {
+    type Response = BuildService;
+    type Error = std::io::Error;
+    type Future = future::Ready<Result<Self::Response, Self::Error>>;
 
-    print_time_cost!("init analyzer", time);
-    let time = SystemTime::now();
-
-    let mut builder = Builder::new(
-        title_analyzer,
-        content_analyzer,
-        Config::new(PathBuf::from("./test_store/"), "test"),
-    );
-
-    for entry in read_dir("/Users/yuxiang.liu/Downloads/test/").unwrap() {
-        let entry = entry.unwrap();
-        let metadata = entry.metadata().unwrap();
-
-        if metadata.is_file() {
-            let filename = entry.file_name().into_string().unwrap();
-            let filename = filename.split(".").collect::<Vec<&str>>();
-
-            let title = filename[0];
-            let content = read_to_string(entry.path()).unwrap();
-            let id = filename[1].parse::<u32>().unwrap();
-
-            builder
-                .add_document(Document {
-                    id,
-                    title,
-                    content: content.as_str(),
-                })
-                .unwrap();
-        }
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Ok(()).into()
     }
 
-    builder.finish().unwrap();
-
-    print_time_cost!("build indexes", time);
+    fn call(&mut self, _: T) -> Self::Future {
+        future::ready(Ok(BuildService {
+            tx: self.tx.clone(),
+        }))
+    }
 }
+
+async fn run_build_server(address: SocketAddr) {
+    let (task, tx) = start_builder_thread();
+
+    let make_svc = MakeBuildService { tx };
+
+    let server = Server::bind(&address).serve(make_svc);
+
+    let graceful =
+        server.with_graceful_shutdown(async { task.await.expect("builder thread error") });
+
+    if let Err(e) = graceful.await {
+        eprintln!("server error: {}", e);
+    }
+}
+
+async fn run_query_server(address: SocketAddr) {}
 
 fn test_query_single() {
     let time = SystemTime::now();
@@ -93,7 +115,7 @@ fn test_query_single() {
 
     let mut query = Query::new(
         analyzer,
-        query::Config::new(PathBuf::from("./test_store/"), "test", 3, 1),
+        query::Config::new(PathBuf::from("../../test_store/"), "test", 3, 1),
     )
     .unwrap();
 
@@ -101,7 +123,7 @@ fn test_query_single() {
 
     let results = query
         .query(
-            "测试",
+            "神里",
             &|w| Levenshtein::new(w, if w.chars().count() > 4 { 1 } else { 0 }).ok(),
             0..10,
         )
@@ -109,16 +131,6 @@ fn test_query_single() {
 
     let costs = SystemTime::now().duration_since(time).unwrap().as_millis();
 
-    let mut string = String::new();
-    for r in results.iter() {
-        string.push('\n');
-        string.push_str(
-            read_to_string(format!("/Users/yuxiang.liu/Downloads/test/TT.{}", r))
-                .unwrap()
-                .as_str(),
-        );
-    }
-    println!("{}", string);
     println!("{:?}", results);
 
     println!("search costs: {}ms, total: {}", costs, results.len());

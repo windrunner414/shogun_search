@@ -35,7 +35,7 @@ impl<'a> Config<'a> {
     }
 }
 
-// TODO: 这泛型太迷了，能用宏替换掉吗？
+// TODO: 这泛型太迷了，能简化吗？
 
 #[derive(Debug)]
 pub struct Builder<'a, C, T, I, C2, T2, I2>

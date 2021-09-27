@@ -3,8 +3,7 @@ use crate::analyzer::char_filter::CharFilter;
 use crate::analyzer::token_filter::TokenFilter;
 use crate::analyzer::tokenizer::Tokenizer;
 use crate::query::score::{
-    calc_cosine_unchecked, calc_norm, calc_tf, Score, TermPriorityCalculator,
-    TfIdfTermPriorityCalculator,
+    calc_norm, calc_tf, Score, TermPriorityCalculator, TfIdfTermPriorityCalculator,
 };
 use crate::query::{Error, Result};
 use crate::store::constants::{
@@ -12,16 +11,13 @@ use crate::store::constants::{
     VERSION,
 };
 use crate::store::posting::{PostingListMerger, RawPostingList};
-use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
-use core::num::FpCategory::Nan;
-use fst::automaton::Levenshtein;
-use fst::{Automaton, IntoStreamer};
+use byteorder::{LittleEndian, ReadBytesExt};
+use fst::IntoStreamer;
 use memmap2::{Mmap, MmapOptions};
-use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
-use std::ops::{Deref, Range};
+use std::io::SeekFrom;
+use std::ops::Range;
 use std::path::PathBuf;
 
 #[derive(Debug)]
@@ -187,8 +183,6 @@ where
 
         postings.sort_by(|a, b| a.1.len().cmp(&b.1.len()));
 
-        println!("{:?}", query_terms);
-
         let mut df = Vec::<u32>::with_capacity(postings.len());
         let mut query_score = Vec::<f64>::with_capacity(postings.len());
         let mut merger = PostingListMerger::new();
@@ -208,6 +202,7 @@ where
 
         let mut result = Vec::new();
 
+        // TODO: 可以用Reverse反向sort
         merger.mut_get_postings().sort_by_cached_key(|p| {
             let mut score = Vec::<f64>::with_capacity(postings.len());
             let terms = p.get_term_priority_info();
